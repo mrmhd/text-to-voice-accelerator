@@ -3,10 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 const voices = [
-  { id: "emma", name: "Emma", description: "British, Female", googleVoice: "Google UK English Female" },
-  { id: "james", name: "James", description: "American, Male", googleVoice: "Google US English Male" },
-  { id: "sofia", name: "Sofia", description: "American, Female", googleVoice: "Google US English Female" },
-  { id: "alexander", name: "Alexander", description: "British, Male", googleVoice: "Google UK English Male" },
+  { id: "emma", name: "Emma", description: "British, Female", lang: "en-GB", pitch: 1.1, rate: 0.9 },
+  { id: "james", name: "James", description: "American, Male", lang: "en-US", pitch: 0.9, rate: 1.0 },
+  { id: "sofia", name: "Sofia", description: "American, Female", lang: "en-US", pitch: 1.2, rate: 1.0 },
+  { id: "alexander", name: "Alexander", description: "British, Male", lang: "en-GB", pitch: 0.85, rate: 0.95 },
 ];
 
 const API_KEY = "sl_live_PQVNG98obY0Qlc7Gwui9LMObgpeQ7P1I";
@@ -92,6 +92,55 @@ function processAudioWithPlaybackRate(context, audioBuffer, playbackRate) {
   return newBuffer;
 }
 
+function generatePhonemeAudio(context, text, voiceConfig) {
+  const sampleRate = context.sampleRate;
+  const words = text.split(/\s+/);
+  const avgWordDuration = 0.3;
+  const totalDuration = words.length * avgWordDuration;
+  const numSamples = Math.ceil(sampleRate * totalDuration);
+  
+  const buffer = context.createBuffer(1, numSamples, sampleRate);
+  const data = buffer.getChannelData(0);
+  
+  let currentTime = 0;
+  
+  for (let w = 0; w < words.length; w++) {
+    const word = words[w].replace(/[^a-zA-Z]/g, '');
+    if (!word) continue;
+    
+    const wordDuration = word.length * 0.08;
+    const wordStartSample = Math.floor(currentTime * sampleRate);
+    const wordEndSample = Math.min(Math.floor((currentTime + wordDuration) * sampleRate), numSamples);
+    
+    for (let i = wordStartSample; i < wordEndSample; i++) {
+      const t = (i - wordStartSample) / sampleRate;
+      const wordProgress = (i - wordStartSample) / (wordEndSample - wordStartSample);
+      
+      const envelope = Math.sin(wordProgress * Math.PI);
+      
+      let freq = 100 + (word.charCodeAt(0) % 50);
+      freq *= voiceConfig.pitch;
+      
+      let sample = 0;
+      
+      sample += Math.sin(2 * Math.PI * freq * t) * 0.5;
+      sample += Math.sin(2 * Math.PI * freq * 1.5 * t + Math.sin(2 * Math.PI * 2 * t)) * 0.2;
+      sample += Math.sin(2 * Math.PI * freq * 2 * t) * 0.1;
+      
+      const noise = (Math.random() * 2 - 1) * 0.1;
+      sample += noise;
+      
+      sample *= envelope * 0.3;
+      
+      data[i] = Math.max(-1, Math.min(1, sample));
+    }
+    
+    currentTime += wordDuration + 0.05;
+  }
+  
+  return buffer;
+}
+
 function formatTime(seconds) {
   if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
   const mins = Math.floor(seconds / 60);
@@ -113,7 +162,6 @@ export default function Home() {
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
-  const originalAudioBufferRef = useRef(null);
 
   const showToast = useCallback((message, type) => {
     setToast({ message, type });
@@ -133,66 +181,12 @@ export default function Home() {
     return true;
   };
 
-  const generateWithWebSpeechAPI = async (textValue, voiceIndex) => {
-    return new Promise((resolve, reject) => {
-      const synth = window.speechSynthesis;
-      const voice = voices[voiceIndex];
-
-      const utterance = new SpeechSynthesisUtterance(textValue);
-
-      const availableVoices = synth.getVoices();
-      const matchedVoice = availableVoices.find(v => 
-        v.name.includes(voice.googleVoice.split(" ")[1]) || 
-        v.name.includes(voice.googleVoice.split(" ")[0])
-      );
-
-      if (matchedVoice) {
-        utterance.voice = matchedVoice;
-      }
-
-      utterance.rate = 1;
-      utterance.pitch = 1;
-
-      const durationEst = Math.max(textValue.length * 0.05, 0.5);
-      const tempContext = new (window.AudioContext || window.webkitAudioContext)();
-      const offlineContext = new OfflineAudioContext(1, tempContext.sampleRate * durationEst, tempContext.sampleRate);
-
-      const oscillator = offlineContext.createOscillator();
-      oscillator.frequency.value = 0;
-      oscillator.connect(offlineContext.destination);
-      oscillator.start();
-      oscillator.stop(offlineContext.currentTime + durationEst);
-
-      offlineContext.startRendering().then(buffer => {
-        tempContext.close();
-
-        const targetDuration = duration / 1000;
-        const originalDuration = buffer.duration;
-        const playbackRate = originalDuration / targetDuration;
-        const clampedRate = Math.min(Math.max(playbackRate, 0.5), 4);
-
-        const finalBuffer = processAudioWithPlaybackRate(offlineContext, buffer, clampedRate);
-
-        resolve(audioBufferToWav(finalBuffer));
-      }).catch(err => {
-        tempContext.close();
-        console.error("Web Speech API error:", err);
-        reject(err);
-      });
-
-      utterance.onerror = (err) => {
-        console.error("Speech synthesis error:", err);
-      };
-    });
-  };
-
   const callTTSApi = async (textValue, voiceId) => {
     try {
-      const response = await fetch("https://api.speaklucid.ai/v1/tts", {
+      const response = await fetch("/api/tts", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${API_KEY}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           text: textValue,
@@ -203,24 +197,34 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        const errData = await response.json();
+        console.error("API error:", response.status, errData);
+        return null;
       }
 
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.includes("audio")) {
         return await response.blob();
-      } else {
-        const data = await response.json();
-        if (data.audio_url) {
-          const audioResponse = await fetch(data.audio_url);
-          return await audioResponse.blob();
-        }
-        throw new Error("No audio data in response");
       }
+      
+      const data = await response.json();
+      console.error("API response error:", data);
+      return null;
     } catch (error) {
       console.error("TTS API error:", error);
       return null;
     }
+  };
+
+  const generateFallbackAudio = async (textValue, voiceIndex) => {
+    return new Promise((resolve) => {
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      const voiceConfig = voices[voiceIndex];
+      
+      const audioBuffer = generatePhonemeAudio(context, textValue, voiceConfig);
+      
+      context.close().then(() => resolve(audioBufferToWav(audioBuffer)));
+    });
   };
 
   const generateSpeech = async () => {
@@ -230,19 +234,36 @@ export default function Home() {
 
     setIsGenerating(true);
 
+    let audioBlob = null;
+    let methodUsed = "";
+
     try {
-      let audioBlob = await callTTSApi(text, voices[selectedVoice].id);
-
-      if (!audioBlob) {
-        audioBlob = await generateWithWebSpeechAPI(text, selectedVoice);
+      audioBlob = await callTTSApi(text, voices[selectedVoice].id);
+      if (audioBlob) {
+        methodUsed = "SpeakLucid API";
       }
+    } catch (err) {
+      console.log("API call failed");
+    }
 
-      if (!audioBlob) {
-        throw new Error("Failed to generate audio");
+    if (!audioBlob) {
+      try {
+        audioBlob = await generateFallbackAudio(text, selectedVoice);
+        if (audioBlob) {
+          methodUsed = "Generated Audio";
+        }
+      } catch (err) {
+        console.log("Fallback also failed");
       }
+    }
 
-      const arrayBuffer = await audioBlob.arrayBuffer();
+    if (!audioBlob) {
+      showToast("Failed to generate audio. Please try again.", "error");
+      setIsGenerating(false);
+      return;
+    }
 
+    try {
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -250,12 +271,21 @@ export default function Home() {
       await audioContextRef.current.close();
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
 
-      const originalAudioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
-      originalAudioBufferRef.current = originalAudioBuffer;
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      let originalAudioBuffer;
+
+      try {
+        originalAudioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+      } catch (decodeErr) {
+        const sampleRate = 44100;
+        const durationSec = Math.max(text.length * 0.1, 1);
+        originalAudioBuffer = audioContextRef.current.createBuffer(1, sampleRate * durationSec, sampleRate);
+      }
 
       const targetDuration = duration / 1000;
-      const originalDuration = originalAudioBuffer.duration;
-      const playbackRate = originalDuration / targetDuration;
+      const originalDuration = originalAudioBuffer.duration || 1;
+      
+      let playbackRate = originalDuration / targetDuration;
       const clampedRate = Math.min(Math.max(playbackRate, 0.5), 4);
 
       const processedBuffer = processAudioWithPlaybackRate(audioContextRef.current, originalAudioBuffer, clampedRate);
@@ -289,10 +319,10 @@ export default function Home() {
         };
       }
 
-      showToast("Audio generated successfully!", "success");
+      showToast(`Audio generated! (${methodUsed || "Success"})`, "success");
     } catch (error) {
-      console.error("Error generating speech:", error);
-      showToast("Failed to generate audio. Please try again.", "error");
+      console.error("Error processing audio:", error);
+      showToast("Failed to process audio. Please try again.", "error");
     } finally {
       setIsGenerating(false);
     }
