@@ -13,7 +13,7 @@ export async function POST(request) {
       );
     }
 
-    const response = await fetch('https://api.speaklucid.ai/v1/tts', {
+    const response = await fetch('https://speaklucid.com/api/tts', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
