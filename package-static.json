@@ -1,0 +1,10 @@
+{
+  "name": "voice-accelerator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve -s .",
+    "build": "echo 'Static build - use npx serve to deploy'",
+    "start": "npx serve -s ."
+  }
+}
