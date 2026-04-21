@@ -35,20 +35,18 @@ export async function POST(request) {
       );
     }
 
-    const contentType = response.headers.get('content-type');
+    const data = await response.json();
     
-    if (contentType && contentType.includes('audio')) {
-      const audioBuffer = await response.arrayBuffer();
+    if (data.audio && data.format === 'mp3') {
+      const audioBuffer = Buffer.from(data.audio, 'base64');
       return new NextResponse(audioBuffer, {
         headers: {
           'Content-Type': 'audio/mpeg',
-          'Content-Length': audioBuffer.byteLength
+          'Content-Length': audioBuffer.length
         }
       });
     }
 
-    const data = await response.json();
-    
     if (data.audio_url) {
       const audioResponse = await fetch(data.audio_url);
       const audioBuffer = await audioResponse.arrayBuffer();
@@ -61,7 +59,7 @@ export async function POST(request) {
     }
 
     return NextResponse.json(
-      { error: 'No audio data in response' },
+      { error: 'No audio data in response', details: data },
       { status: 500 }
     );
   } catch (error) {

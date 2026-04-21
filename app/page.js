@@ -3,10 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
 const voices = [
-  { id: "emma", name: "Emma", description: "British, Female", lang: "en-GB", pitch: 1.1, rate: 0.9 },
-  { id: "james", name: "James", description: "American, Male", lang: "en-US", pitch: 0.9, rate: 1.0 },
-  { id: "sofia", name: "Sofia", description: "American, Female", lang: "en-US", pitch: 1.2, rate: 1.0 },
-  { id: "alexander", name: "Alexander", description: "British, Male", lang: "en-GB", pitch: 0.85, rate: 0.95 },
+  { id: "bf_emma", name: "Emma", apiVoice: "bf_emma", description: "British, Female" },
+  { id: "am_james", name: "James", apiVoice: "am_james", description: "American, Male" },
+  { id: "af_sarah", name: "Sofia", apiVoice: "af_sarah", description: "American, Female" },
+  { id: "bm_george", name: "George", apiVoice: "bm_george", description: "British, Male" },
 ];
 
 const API_KEY = "sl_live_PQVNG98obY0Qlc7Gwui9LMObgpeQ7P1I";
@@ -238,7 +238,7 @@ export default function Home() {
     let methodUsed = "";
 
     try {
-      audioBlob = await callTTSApi(text, voices[selectedVoice].id);
+      audioBlob = await callTTSApi(text, voices[selectedVoice].apiVoice);
       if (audioBlob) {
         methodUsed = "SpeakLucid API";
       }
